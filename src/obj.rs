@@ -27,6 +27,7 @@ use mtl::{Material, Mtl};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, PartialOrd, Eq, Ord)]
 pub struct IndexTuple(pub usize, pub Option<usize>, pub Option<usize>);
+
 pub type SimplePolygon = Vec<IndexTuple>;
 
 pub trait GenPolygon: Clone {
@@ -52,16 +53,16 @@ impl GenPolygon for Polygon<IndexTuple> {
 
 #[derive(Debug, Clone)]
 pub struct Object<'a, P>
-where
-    P: 'a + GenPolygon,
+    where
+        P: 'a + GenPolygon,
 {
     pub name: String,
     pub groups: Vec<Group<'a, P>>,
 }
 
 impl<'a, P> Object<'a, P>
-where
-    P: GenPolygon,
+    where
+        P: GenPolygon,
 {
     pub fn new(name: String) -> Self {
         Object { name: name, groups: Vec::new() }
@@ -70,8 +71,8 @@ where
 
 #[derive(Debug, Clone)]
 pub struct Group<'a, P>
-where
-    P: 'a + GenPolygon,
+    where
+        P: 'a + GenPolygon,
 {
     pub name: String,
     /// An index is used to tell groups apart that share the same name
@@ -81,8 +82,8 @@ where
 }
 
 impl<'a, P> Group<'a, P>
-where
-    P: 'a + GenPolygon,
+    where
+        P: 'a + GenPolygon,
 {
     pub fn new(name: String) -> Self {
         Group {
@@ -94,9 +95,10 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Obj<'a, P>
-where
-    P: 'a + GenPolygon,
+    where
+        P: 'a + GenPolygon,
 {
     pub position: Vec<[f32; 3]>,
     pub texture: Vec<[f32; 2]>,
@@ -115,8 +117,8 @@ fn normalize(idx: isize, len: usize) -> usize {
 }
 
 impl<'a, P> Obj<'a, P>
-where
-    P: GenPolygon,
+    where
+        P: GenPolygon,
 {
     fn new() -> Self {
         Obj {
@@ -128,16 +130,16 @@ where
             path: PathBuf::new(),
         }
     }
-
+    
     pub fn load(path: &Path) -> io::Result<Obj<P>> {
         let f = File::open(path)?;
         let mut obj = Obj::load_buf(&mut BufReader::new(f))?;
         // unwrap is safe as we've read this file before
         obj.path = path.parent().unwrap().to_owned();
-
+        
         Ok(obj)
     }
-
+    
     /// Loads the .mtl files referenced in the .obj file.
     ///
     /// If it encounters an error for an .mtl, it appends its error to the
@@ -148,7 +150,7 @@ where
     pub fn load_mtls(&mut self) -> Result<(), Vec<(String, io::Error)>> {
         let mut errs = Vec::new();
         let mut materials = HashMap::new();
-
+        
         for m in &self.material_libs {
             let file = match File::open(&self.path.join(&m)) {
                 Ok(f) => f,
@@ -162,7 +164,7 @@ where
                 materials.insert(m.name.clone(), Cow::from(m));
             }
         }
-
+        
         for object in &mut self.objects {
             for group in &mut object.groups {
                 if let Some(ref mut mat) = group.material {
@@ -173,10 +175,10 @@ where
                 }
             }
         }
-
+        
         if errs.is_empty() { Ok(()) } else { Err(errs) }
     }
-
+    
     fn parse_vertex(&mut self, v0: Option<&str>, v1: Option<&str>, v2: Option<&str>) {
         let (v0, v1, v2) = match (v0, v1, v2) {
             (Some(v0), Some(v1), Some(v2)) => (v0, v1, v2),
@@ -192,7 +194,7 @@ where
         };
         self.position.push(vertex);
     }
-
+    
     fn parse_texture(&mut self, t0: Option<&str>, t1: Option<&str>) {
         let (t0, t1) = match (t0, t1) {
             (Some(t0), Some(t1)) => (t0, t1),
@@ -208,7 +210,7 @@ where
         };
         self.texture.push(texture);
     }
-
+    
     fn parse_normal(&mut self, n0: Option<&str>, n1: Option<&str>, n2: Option<&str>) {
         let (n0, n1, n2) = match (n0, n1, n2) {
             (Some(n0), Some(n1), Some(n2)) => (n0, n1, n2),
@@ -224,14 +226,14 @@ where
         };
         self.normal.push(normal);
     }
-
+    
     fn parse_group(&self, group: &str) -> Result<IndexTuple, String> {
         let mut group_split = group.split('/');
         let p: Option<isize> = group_split.next().and_then(|idx| FromStr::from_str(idx).ok());
         let t: Option<isize> =
             group_split.next().and_then(|idx| if idx != "" { FromStr::from_str(idx).ok() } else { None });
         let n: Option<isize> = group_split.next().and_then(|idx| FromStr::from_str(idx).ok());
-
+        
         match (p, t, n) {
             (Some(p), v, n) => {
                 Ok(IndexTuple(normalize(p, self.position.len()),
@@ -241,10 +243,10 @@ where
             _ => Err(format!("poorly formed group {}", group)),
         }
     }
-
+    
     fn parse_face<'b, I>(&self, groups: &mut I) -> Result<P, String>
-    where
-        I: Iterator<Item = &'b str>,
+        where
+            I: Iterator<Item=&'b str>,
     {
         let mut ret = Vec::with_capacity(3);
         for g in groups {
@@ -253,25 +255,25 @@ where
         }
         Ok(P::new(ret))
     }
-
+    
     pub fn load_buf<B>(input: &mut B) -> io::Result<Self>
-    where
-        B: BufRead,
+        where
+            B: BufRead,
     {
         let mut dat = Obj::new();
         let mut object = Object::new("default".to_string());
         let mut group: Option<Group<P>> = None;
-
+    
         for (idx, line) in input.lines().enumerate() {
             let (line, mut words) = match line {
                 Ok(ref line) => (line.clone(), line.split_whitespace().filter(|s| !s.is_empty())),
                 Err(err) => {
                     return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                              format!("failed to readline {}", err)))
+                                              format!("failed to readline {}", err)));
                 }
             };
             let first = words.next();
-
+        
             match first {
                 Some("v") => {
                     let (v0, v1, v2) = (words.next(), words.next(), words.next());
@@ -289,21 +291,21 @@ where
                     let poly = match dat.parse_face(&mut words) {
                         Err(e) => {
                             return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                                      format!("could not parse line: {}\nline: {}: {}", e, idx, line)))
+                                                      format!("could not parse line: {}\nline: {}: {}", e, idx, line)));
                         }
                         Ok(poly) => poly,
                     };
                     group = Some(match group {
-                                     None => {
-                                         let mut g = Group::new("default".to_string());
-                                         g.polys.push(poly);
-                                         g
-                                     }
-                                     Some(mut g) => {
-                                         g.polys.push(poly);
-                                         g
-                                     }
-                                 });
+                        None => {
+                            let mut g = Group::new("default".to_string());
+                            g.polys.push(poly);
+                            g
+                        }
+                        Some(mut g) => {
+                            g.polys.push(poly);
+                            g
+                        }
+                    });
                 }
                 Some("o") => {
                     group = match group {
