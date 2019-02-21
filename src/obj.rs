@@ -30,7 +30,7 @@ pub struct IndexTuple(pub usize, pub Option<usize>, pub Option<usize>);
 
 pub type SimplePolygon = Vec<IndexTuple>;
 
-pub trait GenPolygon: Clone {
+pub trait GenPolygon: Clone + std::fmt::Debug {
     fn new(data: SimplePolygon) -> Self;
 }
 
@@ -52,17 +52,13 @@ impl GenPolygon for Polygon<IndexTuple> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Object<'a, P>
-    where
-        P: 'a + GenPolygon,
+pub struct Object<'a, P: GenPolygon>
 {
     pub name: String,
     pub groups: Vec<Group<'a, P>>,
 }
 
-impl<'a, P> Object<'a, P>
-    where
-        P: GenPolygon,
+impl<'a, P: GenPolygon> Object<'a, P>
 {
     pub fn new(name: String) -> Self {
         Object { name: name, groups: Vec::new() }
@@ -131,7 +127,7 @@ impl<'a, P> Obj<'a, P>
         }
     }
     
-    pub fn load(path: &Path) -> io::Result<Obj<P>> {
+    pub fn load_file(path: &Path) -> io::Result<Obj<P>> {
         let f = File::open(path)?;
         let mut obj = Obj::load_buf(&mut BufReader::new(f))?;
         // unwrap is safe as we've read this file before
@@ -256,14 +252,12 @@ impl<'a, P> Obj<'a, P>
         Ok(P::new(ret))
     }
     
-    pub fn load_buf<B>(input: &mut B) -> io::Result<Self>
-        where
-            B: BufRead,
+    pub fn load_buf<B: BufRead>(input: &mut B) -> io::Result<Self>
     {
         let mut dat = Obj::new();
         let mut object = Object::new("default".to_string());
         let mut group: Option<Group<P>> = None;
-    
+        
         for (idx, line) in input.lines().enumerate() {
             let (line, mut words) = match line {
                 Ok(ref line) => (line.clone(), line.split_whitespace().filter(|s| !s.is_empty())),
@@ -273,7 +267,7 @@ impl<'a, P> Obj<'a, P>
                 }
             };
             let first = words.next();
-        
+            
             match first {
                 Some("v") => {
                     let (v0, v1, v2) = (words.next(), words.next(), words.next());
@@ -365,6 +359,252 @@ impl<'a, P> Obj<'a, P>
                     }
                 }
                 None => (),
+            }
+        }
+        match group {
+            Some(g) => object.groups.push(g),
+            None => (),
+        };
+        dat.objects.push(object);
+        Ok(dat)
+    }
+    pub fn load(input: Box<[u8]>) -> io::Result<Self>
+    {
+        let mut dat = Obj::new();
+        let mut object = Object::new("default".to_string());
+        let mut group: Option<Group<P>> = None;
+        
+        let file = String::from_utf8(input.into_vec());
+        
+        match file {
+            Ok(file) => {
+                for (idx, line) in file.lines().enumerate() {
+                    let mut words= line.split_whitespace().filter(|s| !s.is_empty());
+                    let first = words.next();
+    
+                    match first {
+                        Some("v") => {
+                            let (v0, v1, v2) = (words.next(), words.next(), words.next());
+                            dat.parse_vertex(v0, v1, v2);
+                        }
+                        Some("vt") => {
+                            let (t0, t1) = (words.next(), words.next());
+                            dat.parse_texture(t0, t1);
+                        }
+                        Some("vn") => {
+                            let (n0, n1, n2) = (words.next(), words.next(), words.next());
+                            dat.parse_normal(n0, n1, n2);
+                        }
+                        Some("f") => {
+                            let poly = match dat.parse_face(&mut words) {
+                                Err(e) => {
+                                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                                              format!("could not parse line: {}\nline: {}: {}", e, idx, line)));
+                                }
+                                Ok(poly) => poly,
+                            };
+                            group = Some(match group {
+                                None => {
+                                    let mut g = Group::new("default".to_string());
+                                    g.polys.push(poly);
+                                    g
+                                }
+                                Some(mut g) => {
+                                    g.polys.push(poly);
+                                    g
+                                }
+                            });
+                        }
+                        Some("o") => {
+                            group = match group {
+                                Some(val) => {
+                                    object.groups.push(val);
+                                    dat.objects.push(object);
+                                    None
+                                }
+                                None => None,
+                            };
+                            object = if line.len() > 2 {
+                                let name = line[1..].trim();
+                                Object::new(name.to_string())
+                            } else {
+                                Object::new("default".to_string())
+                            };
+                        }
+                        Some("g") => {
+                            group = match group {
+                                Some(val) => {
+                                    object.groups.push(val);
+                                    None
+                                }
+                                None => None,
+                            };
+                            if line.len() > 2 {
+                                let name = line[2..].trim();
+                                group = Some(Group::new(name.to_string()));
+                            }
+                        }
+                        Some("mtllib") => {
+                            let name = words.next().expect("Failed to find name for mtllib");
+                            dat.material_libs.push(name.to_string());
+                        }
+                        Some("usemtl") => {
+                            let mut g = match group {
+                                Some(g) => g,
+                                None => Group::new("default".to_string()),
+                            };
+                            // we found a new material that was applied to an existing
+                            // object. It is treated as a new group.
+                            if g.material.is_some() {
+                                object.groups.push(g.clone());
+                                g.index += 1;
+                                g.polys.clear();
+                            }
+                            g.material = match words.next() {
+                                Some(w) => Some(Cow::from(Material::new(w.to_string()))),
+                                None => None,
+                            };
+                            group = Some(g);
+                        }
+                        Some("s") => (),
+                        Some(other) => {
+                            if !other.starts_with("#") {
+                                panic!("Invalid token {:?} {:?}", other, words.next());
+                            }
+                        }
+                        None => (),
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to read file as String with utf8 {}", err),
+                ));
+            }
+        }
+        match group {
+            Some(g) => object.groups.push(g),
+            None => (),
+        };
+        dat.objects.push(object);
+        Ok(dat)
+    }
+    
+    //TODO: make the type thread-safe and function parallelized
+    pub fn load_par(input: Box<[u8]>) -> io::Result<Self>
+    {
+        let mut dat = Obj::new();
+        let mut object = Object::new("default".to_string());
+        let mut group: Option<Group<P>> = None;
+    
+        let file = String::from_utf8(input.into_vec());
+    
+        match file {
+            Ok(file) => {
+                for (idx, line) in file.lines().enumerate() {
+                    let mut words= line.split_whitespace().filter(|s| !s.is_empty());
+                    let first = words.next();
+                
+                    match first {
+                        Some("v") => {
+                            let (v0, v1, v2) = (words.next(), words.next(), words.next());
+                            dat.parse_vertex(v0, v1, v2);
+                        }
+                        Some("vt") => {
+                            let (t0, t1) = (words.next(), words.next());
+                            dat.parse_texture(t0, t1);
+                        }
+                        Some("vn") => {
+                            let (n0, n1, n2) = (words.next(), words.next(), words.next());
+                            dat.parse_normal(n0, n1, n2);
+                        }
+                        Some("f") => {
+                            let poly = match dat.parse_face(&mut words) {
+                                Err(e) => {
+                                    return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                                              format!("could not parse line: {}\nline: {}: {}", e, idx, line)));
+                                }
+                                Ok(poly) => poly,
+                            };
+                            group = Some(match group {
+                                None => {
+                                    let mut g = Group::new("default".to_string());
+                                    g.polys.push(poly);
+                                    g
+                                }
+                                Some(mut g) => {
+                                    g.polys.push(poly);
+                                    g
+                                }
+                            });
+                        }
+                        Some("o") => {
+                            group = match group {
+                                Some(val) => {
+                                    object.groups.push(val);
+                                    dat.objects.push(object);
+                                    None
+                                }
+                                None => None,
+                            };
+                            object = if line.len() > 2 {
+                                let name = line[1..].trim();
+                                Object::new(name.to_string())
+                            } else {
+                                Object::new("default".to_string())
+                            };
+                        }
+                        Some("g") => {
+                            group = match group {
+                                Some(val) => {
+                                    object.groups.push(val);
+                                    None
+                                }
+                                None => None,
+                            };
+                            if line.len() > 2 {
+                                let name = line[2..].trim();
+                                group = Some(Group::new(name.to_string()));
+                            }
+                        }
+                        Some("mtllib") => {
+                            let name = words.next().expect("Failed to find name for mtllib");
+                            dat.material_libs.push(name.to_string());
+                        }
+                        Some("usemtl") => {
+                            let mut g = match group {
+                                Some(g) => g,
+                                None => Group::new("default".to_string()),
+                            };
+                            // we found a new material that was applied to an existing
+                            // object. It is treated as a new group.
+                            if g.material.is_some() {
+                                object.groups.push(g.clone());
+                                g.index += 1;
+                                g.polys.clear();
+                            }
+                            g.material = match words.next() {
+                                Some(w) => Some(Cow::from(Material::new(w.to_string()))),
+                                None => None,
+                            };
+                            group = Some(g);
+                        }
+                        Some("s") => (),
+                        Some(other) => {
+                            if !other.starts_with("#") {
+                                panic!("Invalid token {:?} {:?}", other, words.next());
+                            }
+                        }
+                        None => (),
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("failed to read file as String with utf8 {}", err),
+                ));
             }
         }
         match group {

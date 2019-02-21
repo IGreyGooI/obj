@@ -19,7 +19,7 @@ use std::str::FromStr;
 #[derive(Debug, Clone)]
 pub struct Material {
     pub name: String,
-
+    
     pub ka: Option<[f32; 3]>,
     pub kd: Option<[f32; 3]>,
     pub ks: Option<[f32; 3]>,
@@ -31,7 +31,7 @@ pub struct Material {
     pub tr: Option<f32>,
     pub d: Option<f32>,
     pub illum: Option<i32>,
-
+    
     pub map_ka: Option<String>,
     pub map_kd: Option<String>,
     pub map_ks: Option<String>,
@@ -78,7 +78,7 @@ impl<'a> From<Material> for Cow<'a, Material> {
 
 struct Parser<I>(I);
 
-impl<'a, I: Iterator<Item = &'a str>> Parser<I> {
+impl<'a, I: Iterator<Item=&'a str>> Parser<I> {
     fn get_vec(&mut self) -> Option<[f32; 3]> {
         let (x, y, z) = match (self.0.next(), self.0.next(), self.0.next()) {
             (Some(x), Some(y), Some(z)) => (x, y, z),
@@ -87,7 +87,7 @@ impl<'a, I: Iterator<Item = &'a str>> Parser<I> {
                 return None;
             }
         };
-
+        
         match (x.parse::<f32>(), y.parse::<f32>(), z.parse::<f32>()) {
             (Ok(x), Ok(y), Ok(z)) => Some([x, y, z]),
             other => {
@@ -96,7 +96,7 @@ impl<'a, I: Iterator<Item = &'a str>> Parser<I> {
             }
         }
     }
-
+    
     fn get_i32(&mut self) -> Option<i32> {
         match self.0.next() {
             Some(v) => FromStr::from_str(v).ok(),
@@ -106,7 +106,7 @@ impl<'a, I: Iterator<Item = &'a str>> Parser<I> {
             }
         }
     }
-
+    
     fn get_f32(&mut self) -> Option<f32> {
         match self.0.next() {
             Some(v) => FromStr::from_str(v).ok(),
@@ -116,7 +116,7 @@ impl<'a, I: Iterator<Item = &'a str>> Parser<I> {
             }
         }
     }
-
+    
     fn get_string(&mut self) -> Option<String> {
         match self.0.next() {
             Some(v) => Some(v.to_string()),
@@ -136,7 +136,7 @@ impl Mtl {
     fn new() -> Self {
         Mtl { materials: Vec::new() }
     }
-
+    
     pub fn load<B: BufRead>(file: &mut B) -> Self {
         let mut mtl = Mtl::new();
         let mut material = None;
@@ -243,11 +243,11 @@ impl Mtl {
                 None => {}
             }
         }
-
+        
         if material.is_some() {
             mtl.materials.push(material.take().unwrap());
         }
-
+        
         mtl
     }
 }
